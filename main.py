@@ -7,31 +7,68 @@ from scipy import stats
 import numpy
 from sklearn import linear_model
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import r2_score
 import pandas
 
 print("Starting...")
 
 start = "2010-01-01"
 end = datetime.datetime.today().strftime("%Y-%m-%d")
-ticker = "AAPL"
+tickers = [
+    "AAPL", "MSFT", "TSLA", "AYI", "JPM", "XOM", "CHV", "FXAIX", "FSPTX", "FZROX", "FNCMX", "GOOG", "AMZN", "NVDA", "META", "UNH"
+]
 
 print("Downloading...")
-data = yf.download(ticker, start, end, interval="1d")
+
+dataArray = []
+for ticker in tickers:
+    newData = yf.download(ticker, start, end, interval="1d")[["Close"]].to_numpy()
+    for i in range(0, newData.size):
+        dataArray.append(newData[i][0])
+
 print("Download complete!")
 
-data = data.reset_index() #Date was the index, now it's a column
-data["Date"] = data["Date"].apply(lambda x: x.value)
+data = pandas.DataFrame({ "Close": dataArray })
+print(data)
+
+# data = data.reset_index() #Date was the index, now it's a column
+# data["Date"] = data["Date"].apply(lambda x: x.value)
+
+historyLength = 30
+trainingCols = []
+for i in range(historyLength):
+    data.insert(i+1, i+1, data.index, True)
+    trainingCols.append(i+1)
+
+print("Formatting data...")
+for index, row in data.iterrows():
+    if(index <= historyLength):
+        continue
+    else:
+        for i in range(historyLength):
+            data.iat[index, i+1] = data.iat[index - i, 0]
+
+data = data.tail(len(data) - historyLength - 1)
+
+print("Formatted data")
+print(data)
+
 
 testingSize = data.index.size / 5
 testingSize = int(testingSize)
 
-training = data.head(len(data) - testingSize)
+training = data.head(data.size - testingSize)
 testing = data.tail(testingSize)
 
-x = training[['Date', 'Open', 'High', 'Low', 'Volume']]
-testingCleaned = testing[['Date', 'Open', 'High', 'Low', 'Volume']]
-scale = StandardScaler()
-x = scale.fit_transform(x)
+training.set_index(1, inplace=True)
+training.sort_index(inplace=True)
+
+testing.set_index(1, inplace=True)
+testing.sort_index(inplace=True)
+
+trainingCols.pop(0)
+
+x = training[trainingCols]
 y = training["Close"]
 
 print("Generating model...")
@@ -39,25 +76,28 @@ model = linear_model.LinearRegression()
 model.fit(x, y)
 print("Model generated!")
 
-def predict(x, shouldScale):
-    if(shouldScale):
-        x = scale.transform(x)
+def predict(x):
     return model.predict(x)
 
 print(model.coef_)
 
-predicted = predict(testingCleaned, True)
+predicted = predict(testing[trainingCols])
 residuals = testing["Close"] - predicted
 
+print("R^2: " + str(r2_score(testing["Close"], predicted)))
+
 plt.figure(figsize=(15, 10))
-plt.xlabel("Date")
-plt.ylabel("Price")
 
-# plt.plot(training["Date"], training["Close"], color="green")
-# plt.plot(training["Date"], predict(x, False), color="blue")
+plt.xlabel("Price")
+plt.ylabel("$")
 
-plt.plot(testing["Date"], testing["Close"], color="green")
-plt.plot(testing["Date"], predicted, color="red")
-plt.plot(testing["Date"], residuals, color="blue")
+plt.plot(x.index, predict(x), color="red")
+plt.plot(x.index, predict(x)-training["Close"], color="blue")
+
+plt.plot(testing.index, predicted, color="orange")
+plt.plot(testing.index, residuals, color="purple")
+
+plt.plot(x.index, y, color="green")
+plt.plot(testing.index, testing["Close"], color="aqua")
 
 plt.show()
